@@ -157,6 +157,7 @@ export async function POST(request) {
 }
 
 async function onInterviewScheduled(schedule) {
+  if (schedule.status === "Cancelled") return onInterviewCancelled(schedule);
   if (schedule.status !== "Scheduled" || !schedule.interviewEvents?.length) return;
 
   const application = await getApplication(schedule.applicationId);
@@ -184,5 +185,36 @@ async function onInterviewScheduled(schedule) {
       ` ${formatDate(event.startTime)}`;
     const posted = await postMessage({ channel, text, threadTs: ts });
     if (!ts) ts = posted; // le premier message devient le thread du candidat
+  }
+}
+
+// Annulation : message dans le thread du candidat (seulement si le thread existe déjà).
+// "L'entretien <Titre> de <Candidat> prévu le mar. 27/10 à 12h15 a été annulé"
+async function onInterviewCancelled(schedule) {
+  const application = await getApplication(schedule.applicationId);
+  const channel = JOB_CHANNELS[application.job?.id];
+  if (!channel) return;
+
+  const ts = await findThread(channel, application.id);
+  if (!ts) return;
+  const already = await threadTexts(channel, ts);
+  if (already.some((t) => t.includes(`c=${schedule.id}`))) return; // déjà posté
+
+  const name = application.candidate.name;
+  const link = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed?c=${schedule.id}`;
+  const events = schedule.interviewEvents || [];
+
+  if (!events.length) {
+    await postMessage({ channel, threadTs: ts, text: `Un entretien de <${link}|${name}> a été annulé` });
+    return;
+  }
+  for (const event of events) {
+    const interview = await getInterview(event.interviewId);
+    const when = event.startTime ? ` prévu ${formatDate(event.startTime)}` : "";
+    await postMessage({
+      channel,
+      threadTs: ts,
+      text: `L'entretien ${interview.title} de <${link}|${name}>${when} a été annulé`,
+    });
   }
 }
