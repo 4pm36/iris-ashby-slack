@@ -161,6 +161,12 @@ export async function POST(request) {
 
   const payload = JSON.parse(raw);
   if (payload.action === "ping") return new Response("pong");
+  if (payload.action === "applicationUpdate") {
+    // Test : savoir si Ashby envoie ce webhook quand un feedback est soumis (on ne poste rien).
+    const a = payload.data?.application;
+    console.log("applicationUpdate", a?.id, a?.status, a?.currentInterviewStage?.title, Object.keys(payload.data || {}).join(","));
+    return new Response("ok");
+  }
 
   if (["interviewScheduleCreate", "interviewScheduleUpdate"].includes(payload.action)) {
     const sc = payload.data.interviewSchedule;
