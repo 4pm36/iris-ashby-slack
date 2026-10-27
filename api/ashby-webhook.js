@@ -54,9 +54,15 @@ async function slack(method, body) {
   return json;
 }
 
+// Lectures Slack en POST "form-urlencoded" (format accepté par toutes les méthodes Slack).
 async function slackGet(method, params) {
-  const res = await fetch(`https://slack.com/api/${method}?${new URLSearchParams(params)}`, {
-    headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+  const res = await fetch(`https://slack.com/api/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])),
   });
   const json = await res.json();
   if (!json.ok) throw new Error(`Slack ${method}: ${json.error}`);
@@ -84,7 +90,13 @@ async function findThread(channel, applicationId) {
 
 // Textes déjà postés dans le thread (message principal + réponses), pour éviter les doublons.
 async function threadTexts(channel, ts) {
-  const json = await slackGet("conversations.replies", { channel, ts, limit: 200 });
+  let json;
+  try {
+    json = await slackGet("conversations.replies", { channel, ts, limit: 200 });
+  } catch (e) {
+    console.error(e); // on poste quand même plutôt que de bloquer
+    return [];
+  }
   const unescape = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   return json.messages.map((m) => unescape(m.text || ""));
 }
@@ -168,19 +180,19 @@ async function onInterviewScheduled(schedule) {
   const link = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed`;
 
   let ts = await findThread(channel, application.id);
-  if (ts) {
-    const already = await threadTexts(channel, ts);
-    if (already.some((t) => t.includes(`s=${schedule.id}`))) return; // déjà posté
-  }
+  const already = ts ? await threadTexts(channel, ts) : [];
 
   const events = [...schedule.interviewEvents].sort(
     (a, b) => new Date(a.startTime) - new Date(b.startTime)
   );
   for (const event of events) {
+    // Repère invisible (dans le lien) : planning + heure. Même heure = déjà posté ; nouvelle heure = RDV décalé, on reposte.
+    const key = `s=${schedule.id}.${Date.parse(event.startTime) / 1000}`;
+    if (already.some((t) => t.includes(key))) continue;
     const interview = await getInterview(event.interviewId);
     const who = await interviewers(event);
     const text =
-      `<${link}?s=${schedule.id}|${name}> a pris RDV pour son entretien ${interview.title}` +
+      `<${link}?${key}|${name}> a pris RDV pour son entretien ${interview.title}` +
       (who ? ` avec ${who}` : "") +
       ` ${formatDate(event.startTime)}`;
     const posted = await postMessage({ channel, text, threadTs: ts });
@@ -198,17 +210,21 @@ async function onInterviewCancelled(schedule) {
   const ts = await findThread(channel, application.id);
   if (!ts) return;
   const already = await threadTexts(channel, ts);
-  if (already.some((t) => t.includes(`c=${schedule.id}`))) return; // déjà posté
 
   const name = application.candidate.name;
-  const link = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed?c=${schedule.id}`;
+  const base = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed`;
   const events = schedule.interviewEvents || [];
 
   if (!events.length) {
-    await postMessage({ channel, threadTs: ts, text: `Un entretien de <${link}|${name}> a été annulé` });
+    const key = `c=${schedule.id}`;
+    if (already.some((t) => t.includes(key))) return;
+    await postMessage({ channel, threadTs: ts, text: `Un entretien de <${base}?${key}|${name}> a été annulé` });
     return;
   }
   for (const event of events) {
+    const key = `c=${schedule.id}.${Date.parse(event.startTime) / 1000}`;
+    if (already.some((t) => t.includes(key))) continue; // déjà posté
+    const link = `${base}?${key}`;
     const interview = await getInterview(event.interviewId);
     const when = event.startTime ? ` prévu ${formatDate(event.startTime)}` : "";
     await postMessage({
