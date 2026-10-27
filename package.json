@@ -1,0 +1,6 @@
+{
+  "name": "ashby-slack-threads",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" }
+}
