@@ -54,6 +54,15 @@ async function slack(method, body) {
   return json;
 }
 
+async function slackGet(method, params) {
+  const res = await fetch(`https://slack.com/api/${method}?${new URLSearchParams(params)}`, {
+    headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(`Slack ${method}: ${json.error}`);
+  return json;
+}
+
 async function postMessage({ channel, text, threadTs }) {
   const json = await slack("chat.postMessage", { channel, text, thread_ts: threadTs, unfurl_links: false });
   return json.ts;
@@ -64,7 +73,7 @@ async function postMessage({ channel, text, threadTs }) {
 async function findThread(channel, applicationId) {
   let cursor;
   for (let page = 0; page < 5; page++) {
-    const json = await slack("conversations.history", { channel, limit: 200, cursor });
+    const json = await slackGet("conversations.history", { channel, limit: 200, ...(cursor ? { cursor } : {}) });
     const hit = json.messages.find((m) => m.text?.includes(`/applications/${applicationId}`));
     if (hit) return hit.ts;
     cursor = json.response_metadata?.next_cursor;
@@ -75,13 +84,13 @@ async function findThread(channel, applicationId) {
 
 // Textes déjà postés dans le thread (message principal + réponses), pour éviter les doublons.
 async function threadTexts(channel, ts) {
-  const json = await slack("conversations.replies", { channel, ts, limit: 200 });
+  const json = await slackGet("conversations.replies", { channel, ts, limit: 200 });
   const unescape = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   return json.messages.map((m) => unescape(m.text || ""));
 }
 
 // ===== Format des messages =====
-// "mar. 28/10 14h" ou "mar. 28/10 14h30"
+// "le mar. 28/10 à 14h" ou "le mar. 28/10 à 14h30"
 function formatDate(iso) {
   const d = new Date(iso);
   const parts = Object.fromEntries(
@@ -98,22 +107,36 @@ function formatDate(iso) {
       .map((p) => [p.type, p.value])
   );
   const min = parts.minute === "00" ? "" : parts.minute;
-  return `${parts.weekday} ${parts.day}/${parts.month} ${Number(parts.hour)}h${min}`;
+  return `le ${parts.weekday} ${parts.day}/${parts.month} à ${Number(parts.hour)}h${min}`;
 }
 
-function interviewers(event) {
-  return (event.interviewers || []).map((u) => u.firstName).join(", ");
+// Tag Slack de l'interviewer (retrouvé par son email). Si introuvable : son prénom.
+const slackIdCache = new Map();
+async function mention(user) {
+  if (!user?.email) return user?.firstName || "";
+  if (!slackIdCache.has(user.email)) {
+    let id = null;
+    try {
+      id = (await slackGet("users.lookupByEmail", { email: user.email })).user.id;
+    } catch {}
+    slackIdCache.set(user.email, id);
+  }
+  const id = slackIdCache.get(user.email);
+  return id ? `<@${id}>` : user.firstName;
 }
 
-// "Screening mar. 28/10 14h · Wallerand"
-function eventLine(title, event) {
-  return [`${title} ${formatDate(event.startTime)}`, interviewers(event)].filter(Boolean).join(" · ");
+async function interviewers(event) {
+  const tags = [];
+  for (const u of event.interviewers || []) tags.push(await mention(u));
+  return tags.filter(Boolean).join(", ");
 }
 
 // ===== Webhook =====
 // Brique 1 : un entretien est planifié -> thread du candidat dans le channel du poste.
-// - pas encore de thread : on le crée ("🆕 ...")
-// - thread existant : on répond dedans ("📅 ...")
+// Message : "<Candidat (lien Ashby)> a pris RDV pour son entretien <Titre> avec @interviewer"
+// - pas encore de thread : ce message devient le thread du candidat
+// - thread existant : on répond dedans
+// Chaque message contient l'id du planning Ashby dans son lien : un même planning n'est jamais posté deux fois.
 // Le thread est retrouvé dans Slack grâce au lien Ashby du message principal : rien n'est stocké ailleurs.
 // Pas encore géré : feedbacks, changements d'étape, annulations.
 
@@ -140,28 +163,26 @@ async function onInterviewScheduled(schedule) {
   const channel = JOB_CHANNELS[application.job?.id];
   if (!channel) return; // poste pas (encore) branché
 
-  const events = [...schedule.interviewEvents].sort(
-    (a, b) => new Date(a.startTime) - new Date(b.startTime)
-  );
-  const lines = [];
-  for (const event of events) {
-    const interview = await getInterview(event.interviewId);
-    lines.push(eventLine(interview.title, event));
-  }
-
   const name = application.candidate.name;
   const link = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed`;
 
   let ts = await findThread(channel, application.id);
-  let toPost = lines;
-  if (!ts) {
-    const [first, ...rest] = lines;
-    ts = await postMessage({ channel, text: `🆕 *${name}* · ${first} · <${link}|Ashby>` });
-    toPost = rest;
-  } else {
-    // Ashby renvoie le même planning à chaque modification : on ne reposte pas une ligne déjà présente.
+  if (ts) {
     const already = await threadTexts(channel, ts);
-    toPost = lines.filter((line) => !already.some((t) => t.includes(line)));
+    if (already.some((t) => t.includes(`s=${schedule.id}`))) return; // déjà posté
   }
-  for (const line of toPost) await postMessage({ channel, threadTs: ts, text: `📅 ${line}` });
+
+  const events = [...schedule.interviewEvents].sort(
+    (a, b) => new Date(a.startTime) - new Date(b.startTime)
+  );
+  for (const event of events) {
+    const interview = await getInterview(event.interviewId);
+    const who = await interviewers(event);
+    const text =
+      `<${link}?s=${schedule.id}|${name}> a pris RDV pour son entretien ${interview.title}` +
+      (who ? ` avec ${who}` : "") +
+      ` ${formatDate(event.startTime)}`;
+    const posted = await postMessage({ channel, text, threadTs: ts });
+    if (!ts) ts = posted; // le premier message devient le thread du candidat
+  }
 }
