@@ -163,14 +163,17 @@ export async function POST(request) {
   if (payload.action === "ping") return new Response("pong");
 
   if (["interviewScheduleCreate", "interviewScheduleUpdate"].includes(payload.action)) {
+    const sc = payload.data.interviewSchedule;
+    console.log(payload.action, sc.id, sc.status, `${sc.interviewEvents?.length ?? 0} créneau(x)`); // visible dans les logs Vercel
     await onInterviewScheduled(payload.data.interviewSchedule);
   }
   return new Response("ok");
 }
 
 async function onInterviewScheduled(schedule) {
-  if (schedule.status === "Cancelled") return onInterviewCancelled(schedule);
-  if (schedule.status !== "Scheduled" || !schedule.interviewEvents?.length) return;
+  // Dans Ashby, annuler un entretien ne met pas le planning en "Cancelled" :
+  // il repasse "à planifier" sans créneau. Tout planning qui n'est plus "Scheduled" = annulation.
+  if (schedule.status !== "Scheduled" || !schedule.interviewEvents?.length) return onInterviewCancelled(schedule);
 
   const application = await getApplication(schedule.applicationId);
   const channel = JOB_CHANNELS[application.job?.id];
@@ -200,8 +203,8 @@ async function onInterviewScheduled(schedule) {
   }
 }
 
-// Annulation : message dans le thread du candidat (seulement si le thread existe déjà).
-// "L'entretien <Titre> de <Candidat> prévu le mar. 27/10 à 12h15 a été annulé"
+// Annulation : on retrouve dans le thread les RDV postés pour ce planning et pas encore annulés,
+// et on poste pour chacun : "L'entretien <Titre> de <Candidat> prévu le mar. 27/10 à 12h15 a été annulé"
 async function onInterviewCancelled(schedule) {
   const application = await getApplication(schedule.applicationId);
   const channel = JOB_CHANNELS[application.job?.id];
@@ -209,28 +212,24 @@ async function onInterviewCancelled(schedule) {
 
   const ts = await findThread(channel, application.id);
   if (!ts) return;
-  const already = await threadTexts(channel, ts);
+  const texts = await threadTexts(channel, ts);
 
   const name = application.candidate.name;
   const base = `https://app.ashbyhq.com/candidates/${application.candidate.id}/applications/${application.id}/feed`;
-  const events = schedule.interviewEvents || [];
+  const booked = new RegExp(`s=${schedule.id}\\.(\\d+)\\|`);
 
-  if (!events.length) {
-    const key = `c=${schedule.id}`;
-    if (already.some((t) => t.includes(key))) return;
-    await postMessage({ channel, threadTs: ts, text: `Un entretien de <${base}?${key}|${name}> a été annulé` });
-    return;
-  }
-  for (const event of events) {
-    const key = `c=${schedule.id}.${Date.parse(event.startTime) / 1000}`;
-    if (already.some((t) => t.includes(key))) continue; // déjà posté
-    const link = `${base}?${key}`;
-    const interview = await getInterview(event.interviewId);
-    const when = event.startTime ? ` prévu ${formatDate(event.startTime)}` : "";
+  for (const t of texts) {
+    const m = t.match(booked);
+    if (!m) continue;
+    const key = `c=${schedule.id}.${m[1]}`;
+    if (texts.some((x) => x.includes(key))) continue; // déjà annoncé
+    const title = (t.match(/pour son entretien (.+?) (?:avec .+ )?le \S+ \d{2}\/\d{2} à \S+$/) || [])[1] || "";
+    const when = formatDate(new Date(Number(m[1]) * 1000).toISOString());
     await postMessage({
       channel,
       threadTs: ts,
-      text: `L'entretien ${interview.title} de <${link}|${name}>${when} a été annulé`,
+      text: `L'entretien${title ? " " + title : ""} de <${base}?${key}|${name}> prévu ${when} a été annulé`,
     });
+    texts.push(key);
   }
 }
