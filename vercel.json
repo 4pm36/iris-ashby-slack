@@ -1,0 +1,1 @@
+{"crons":[{"path":"/api/cron/resume-entretiens?run=hiver","schedule":"0 18 * * *"},{"path":"/api/cron/resume-entretiens?run=ete","schedule":"0 17 * * *"}]}
