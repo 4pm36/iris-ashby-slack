@@ -44,7 +44,7 @@ export async function POST(request) {
           await postMessage({
             channel: process.env.SLACK_USER_ID,
             text:
-              `⚠️ Le feedback de <@${payload.user.id}> sur ${JSON.parse(send.value).n} n'a pas pu être enregistré dans Ashby ` +
+              `⚠️ Le feedback de <@${payload.user.id}> sur <${JSON.parse(send.value).l}|${JSON.parse(send.value).n}> n'a pas pu être enregistré dans Ashby ` +
               `(${String(e.message).slice(0, 200)}).\nNote : ${note}\nFeedback : "${text}"`,
           }).catch(() => {});
         }
