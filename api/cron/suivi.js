@@ -1,9 +1,10 @@
 // Iris — suivi des candidats, appelé toutes les minutes (cron-job.org, header Authorization: Bearer CRON_SECRET)
 //
-// 1. Feedbacks : Ashby ne prévient pas quand un feedback est soumis, donc Iris regarde chaque minute
-//    les feedbacks soumis dans l'heure et poste dans le thread du candidat :
-//    "@auteur a mis la note de X avec ce feedback : "…"" puis, selon l'étape et la note, un message de suite.
-// 2. Relances (une fois par heure) : candidat toujours en entretien final 48 h puis 7 jours après celui-ci.
+// 1. Demandes de feedback : à la fin d'un entretien, Iris envoie en privé à chaque intervieweur un message avec
+//    la note + le feedback à remplir directement dans le message (lib/demandes.js). Relance 30 min après si rien n'est soumis.
+// 2. Feedbacks : Ashby ne prévient pas quand un feedback est soumis directement dans Ashby, donc Iris regarde
+//    chaque minute les feedbacks soumis dans l'heure et les poste dans le thread du candidat (lib/feedback.js).
+// 3. Relances (une fois par heure) : candidat toujours en entretien final 48 h puis 7 jours après celui-ci.
 //
 // Doublons : chaque message posté porte un repère invisible (metadata Slack), relu avant de poster.
 // Test à la main : /api/cron/suivi?relances=1 (force les relances), avec le header Authorization.
@@ -15,13 +16,14 @@ import {
   applicationLink,
   jobPlan,
   recruiterOf,
-  hiringManagerOf,
   postMessage,
   findThread,
   threadMessages,
   hasMarker,
   mention,
 } from "../../lib/iris.js";
+import { postFeedback } from "../../lib/feedback.js";
+import { sendFeedbackRequests } from "../../lib/demandes.js";
 
 // feedbacks soumis dans la dernière heure (FEEDBACK_WINDOW_MIN : autre durée, pour les tests en local)
 const FEEDBACK_WINDOW_MS = Number(process.env.FEEDBACK_WINDOW_MIN || 60) * 60 * 1000;
@@ -34,27 +36,13 @@ export async function GET(request) {
   const now = new Date();
   const forceReminders = new URL(request.url).searchParams.get("relances") === "1";
 
+  const demandes = await sendFeedbackRequests(now).catch((e) => (console.error("demandes", e), { error: String(e) }));
   const feedbacks = await processFeedbacks(now);
   const reminders = forceReminders || now.getUTCMinutes() === 0 ? await processReminders(now) : null;
-  return Response.json({ feedbacks, reminders });
+  return Response.json({ demandes, feedbacks, reminders });
 }
 
-// ===== 1. Feedbacks =====
-
-// Note globale (1 à 4) et feedback global, lus d'après le formulaire.
-function readFeedback(f) {
-  const fields = (f.formDefinition?.sections ?? []).flatMap((s) => (s.fields ?? []).map((x) => x.field ?? x));
-  const noteField = fields.find((x) => /overall recommendation/i.test(x.title)) ?? { path: "overall_recommendation" };
-  const textField = fields.find((x) => /feedback global/i.test(x.title)) ?? { path: "feedback" };
-
-  let note = f.submittedValues?.[noteField.path];
-  const label = noteField.selectableValues?.find((s) => String(s.value) === String(note))?.label;
-  note = parseInt(label ?? note, 10);
-
-  let text = f.submittedValues?.[textField.path];
-  if (text && typeof text === "object") text = text.value ?? "";
-  return { note: Number.isFinite(note) ? note : null, text: String(text ?? "").trim() };
-}
+// ===== Feedbacks soumis dans Ashby =====
 
 async function processFeedbacks(now) {
   const since = now.getTime() - FEEDBACK_WINDOW_MS;
@@ -66,7 +54,7 @@ async function processFeedbacks(now) {
   let posted = 0;
   for (const f of recent) {
     try {
-      posted += await handleFeedback(f);
+      posted += await postFeedback(f);
     } catch (e) {
       console.error("feedback", f.id, e); // on continue avec les autres
     }
@@ -74,71 +62,7 @@ async function processFeedbacks(now) {
   return { checked: recent.length, posted };
 }
 
-async function handleFeedback(f) {
-  const application = await getApplication(f.applicationId);
-  const channel = JOB_CHANNELS[application.job?.id];
-  if (!channel) return 0; // poste pas (encore) branché
-
-  const ts = await findThread(channel, application.id);
-  if (!ts) {
-    console.log("feedback", f.id, "pas de thread pour la candidature", application.id);
-    return 0;
-  }
-  const messages = await threadMessages(channel, ts);
-  const sameFeedback = (p) => p.feedback_id === f.id;
-  let count = 0;
-
-  const { note, text } = readFeedback(f);
-  const author = await mention(f.submittedByUser);
-
-  if (!hasMarker(messages, "iris_feedback", sameFeedback)) {
-    const body = text ? ` avec ce feedback : "${text}"` : "";
-    await postMessage({
-      channel,
-      threadTs: ts,
-      text: `${author} a mis la note de ${note ?? "?"}${body}`,
-      metadata: { event_type: "iris_feedback", event_payload: { feedback_id: f.id } },
-    });
-    count++;
-  }
-
-  if (!hasMarker(messages, "iris_suite", sameFeedback)) {
-    const plan = await jobPlan(application.job.id);
-    const kind = plan.kindByStage.get(plan.stageByInterview.get(f.interviewId)) ?? null;
-    const suite = await followUp(kind, note, application, f);
-    if (suite) {
-      await postMessage({
-        channel,
-        threadTs: ts,
-        text: suite,
-        metadata: { event_type: "iris_suite", event_payload: { feedback_id: f.id } },
-      });
-      count++;
-    }
-  }
-  return count;
-}
-
-// Message selon l'étape et la note (rien pour l'entretien final)
-async function followUp(kind, note, application, f) {
-  if (!note) return null;
-  if (kind === "screening") {
-    // le recruteur est l'auteur du feedback de screening
-    const recruiter = await mention(f.submittedByUser);
-    if (note <= 2) return `${recruiter}, n'oublie pas d'envoyer un mail de refus`;
-    if (note === 3) return `${await mention(await hiringManagerOf(application))}, que penses-tu de ce profil ?`;
-    return null;
-  }
-  if (kind === "hm") {
-    const recruiter = await mention(await recruiterOf(application));
-    if (note <= 2)
-      return `${recruiter}, malheureusement le candidat a échoué à cette étape, pense à lui envoyer un mail de refus 😢`;
-    return `${recruiter}, le candidat a réussi son entretien, il peut passer à l'étape suivante 🎉`;
-  }
-  return null;
-}
-
-// ===== 2. Relances après l'entretien final =====
+// ===== Relances après l'entretien final =====
 
 async function processReminders(now) {
   let posted = 0;
