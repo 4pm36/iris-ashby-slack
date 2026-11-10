@@ -1,6 +1,6 @@
 // Clics Slack d'Iris (Slack app > Interactivity > Request URL = /api/slack-interactions)
-// Message privé de demande de feedback : note (boutons) + feedback global (zone de texte) + "Envoyer".
-// "Envoyer" -> feedback enregistré dans Ashby au nom de l'intervieweur, message remplacé par un merci,
+// Message privé de demande de feedback : feedback global (zone de texte) + un bouton par note.
+// Clic sur une note -> feedback enregistré dans Ashby au nom de l'intervieweur, message remplacé par un merci,
 // puis feedback posté dans le thread du candidat.
 
 import crypto from "node:crypto";
@@ -22,20 +22,20 @@ export async function POST(request) {
   if (!verifySlack(raw, request.headers)) return new Response("bad signature", { status: 401 });
   const payload = JSON.parse(new URLSearchParams(raw).get("payload"));
 
-  const send = payload.type === "block_actions" && payload.actions?.find((a) => a.action_id === "iris_feedback_send");
-  if (!send) return new Response(""); // simple clic sur une note : rien à faire
+  // Clic sur un bouton de note (iris_note_4 … iris_note_1) : envoie le feedback avec cette note
+  const send = payload.type === "block_actions" && payload.actions?.find((a) => a.action_id?.startsWith("iris_note_"));
+  if (!send) return new Response("");
 
-  const values = payload.state?.values ?? {};
-  const note = values.note?.iris_note?.selected_option?.value;
-  const text = values.texte?.v?.value?.trim();
-  if (!note || !text) return new Response(""); // note ou feedback manquant : le bouton ne fait rien
+  const note = JSON.parse(send.value).v;
+  const text = payload.state?.values?.texte?.v?.value?.trim();
+  if (!text) return new Response(""); // feedback global vide : le bouton ne fait rien
 
   // Slack attend une réponse en moins de 3 s : on répond tout de suite et on travaille ensuite.
   waitUntil(
     (async () => {
       let result;
       try {
-        result = await submitFeedback(send.value, note, text);
+        result = await submitFeedback(send.value, text);
       } catch (e) {
         // Ne devrait pas arriver (3 essais). Le message de l'intervieweur reste tel quel, il peut renvoyer ;
         // Léa est prévenue avec le contenu du feedback pour pouvoir le saisir elle-même.

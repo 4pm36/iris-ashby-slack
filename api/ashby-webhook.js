@@ -102,20 +102,19 @@ async function postFinalPlanning({ application, schedule, events, channel, ts, a
   for (const e of events) {
     const d = formatDay(e.startTime);
     if (d !== day) {
-      lines.push(d.charAt(0).toUpperCase() + d.slice(1));
+      lines.push(`*${d.charAt(0).toUpperCase() + d.slice(1)}*`);
       day = d;
     }
     const title = (await getInterview(e.interviewId)).title;
     const who = await mentionAll(e.interviewers);
-    lines.push(`• ${formatHour(e.startTime)}–${formatHour(e.endTime)} · ${title}${who ? ` · ${who}` : ""}`);
+    lines.push(`• *${formatHour(e.startTime)}–${formatHour(e.endTime)}* · ${title}${who ? ` · ${who}` : ""}`);
   }
 
   const lea = process.env.SLACK_USER_ID ? `<@${process.env.SLACK_USER_ID}>` : "Léa";
   const text =
-    `Hello, nous recevons <${link}?${key}|${name}> pour son entretien final le ${formatDay(events[0].startTime)} ` +
+    `Hello, nous recevons <${link}?${key}|${name}> pour son entretien final le *${formatDay(events[0].startTime)}* ` +
     `pour le poste de ${application.job.title}.\n\n` +
-    `Voici son profil : <${link}|Ashby Profile>\n\n` +
-    `*Planning des interviews :*\n${lines.join("\n")}\n\n` +
+    `Planning des interviews :\n${lines.join("\n")}\n\n` +
     `Ce thread vous servira à échanger sur le candidat pendant l'entretien. ` +
     `Un feedback vous sera demandé en privé à la fin de votre tour.\n\n` +
     `Si le candidat ne réussit pas le case, signalez-le à ${lea} en lui donnant votre feedback, elle le raccompagnera.\n\n` +
@@ -160,7 +159,7 @@ async function onInterviewCancelled(schedule) {
     const key = `c=${schedule.id}.${m[1]}`;
     if (texts.some((x) => x.includes(key))) continue; // déjà annoncé
     const title =
-      (t.match(/pour son entretien (.+?) (?:avec .+ )?le \S+ \d{2}\/\d{2} à \S+$/) || [])[1] ||
+      (t.match(/pour son entretien (.+?) (?:avec .+ )?le \*?\S+ \d{2}\/\d{2} à [^\s*]+\*?$/) || [])[1] ||
       (t.includes("pour son entretien final") ? "final" : "");
     const when = formatDate(new Date(Number(m[1]) * 1000).toISOString());
     await postMessage({
