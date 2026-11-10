@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   JOB_CHANNELS,
+  slack,
   verifySignature,
   getApplication,
   getInterview,
@@ -37,7 +38,9 @@ export async function POST(request) {
   const payload = JSON.parse(raw);
   if (payload.action === "ping") return new Response("pong");
 
-  if (["interviewScheduleCreate", "interviewScheduleUpdate"].includes(payload.action)) {
+  // Ashby envoie "Create" ET "Update" au même instant pour un nouveau planning : on ne traite que "Update"
+  // (sinon les deux arrivent en parallèle et le message est posté deux fois).
+  if (payload.action === "interviewScheduleUpdate") {
     const sc = payload.data.interviewSchedule;
     console.log(payload.action, sc.id, sc.status, `${sc.interviewEvents?.length ?? 0} créneau(x)`); // visible dans les logs Vercel
     await onInterviewScheduled(sc);
@@ -119,12 +122,21 @@ async function postFinalPlanning({ application, schedule, events, channel, ts, a
     `Bonne interview ! 😊`;
 
   const end = Math.max(...events.map((e) => Date.parse(e.endTime) / 1000));
-  await postMessage({
+  const posted = await postMessage({
     channel,
     text,
     threadTs: ts ?? undefined,
     metadata: { event_type: "iris_final", event_payload: { schedule_id: schedule.id, signature, end } },
   });
+
+  // Sécurité si deux mises à jour arrivent en même temps : s'il existe déjà le même planning posté avant le nôtre,
+  // on supprime le nôtre.
+  if (ts && !process.env.DRY_RUN) {
+    const same = (await threadMessages(channel, ts)).filter(
+      (m) => m.metadata?.event_type === "iris_final" && m.metadata.event_payload?.schedule_id === schedule.id && m.metadata.event_payload?.signature === signature
+    );
+    if (same.length > 1 && same[0].ts !== posted) await slack("chat.delete", { channel, ts: posted }).catch(() => {});
+  }
 }
 
 // Annulation : on retrouve dans le thread les RDV postés pour ce planning et pas encore annulés,
