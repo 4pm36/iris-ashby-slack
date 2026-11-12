@@ -159,7 +159,7 @@ async function onInterviewCancelled(schedule) {
     const key = `c=${schedule.id}.${m[1]}`;
     if (texts.some((x) => x.includes(key))) continue; // déjà annoncé
     const title =
-      (t.match(/pour son entretien (.+?) (?:avec .+ )?le \*?\S+ \d{2}\/\d{2} à [^\s*]+\*?$/) || [])[1] ||
+      (t.match(/pour son entretien (.+?) (?:avec .+ )?le \*?\S+ \d{2}\/\d{2}\*? à \*?[^\s*]+\*?$/) || [])[1] ||
       (t.includes("pour son entretien final") ? "final" : "");
     const when = formatDate(new Date(Number(m[1]) * 1000).toISOString());
     await postMessage({
