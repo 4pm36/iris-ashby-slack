@@ -6,6 +6,7 @@ Lundi, mercredi et vendredi à 9h (Paris), pour chaque poste ouvert dans Ashby q
 
 - Code : `lib/tri.js` (tri + message), `lib/notion.js` (critères + journal), `api/cron/tri.js`, `api/tri-poste.js`
 - Journal (mémoire d'Iris, rien à y faire) : base Notion « Journal de tri » dans la page privée « Iris – Journal de tri ». Supprimer une ligne force le re-tri du candidat.
+- Interrupteur : le cron ne fait rien tant que la variable Vercel `TRI_ACTIF` n'est pas à `1` (le mode test marche sans)
 - Variables Vercel en plus : `ANTHROPIC_API_KEY`, `NOTION_TOKEN` (l'intégration Notion doit être connectée à Job infos et au journal)
 - Test sur un poste, message à Léa seulement, journal pas modifié (header `Authorization: Bearer CRON_SECRET`) :
   `/api/tri-poste?job=<jobId>&test=1` (ajouter `&fresh=1` pour relire tous les CV)

@@ -15,6 +15,9 @@ export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const jobId = params.get("job");
   if (!jobId) return new Response("paramètre job manquant", { status: 400 });
-  const result = await triPoste(jobId, { test: params.get("test") === "1", fresh: params.get("fresh") === "1" });
+  const test = params.get("test") === "1";
+  // Interrupteur : sans TRI_ACTIF=1, seul le mode test est permis (rien ne part aux recruteurs)
+  if (!test && process.env.TRI_ACTIF !== "1") return Response.json({ skipped: "TRI_ACTIF pas à 1 (utiliser test=1)" });
+  const result = await triPoste(jobId, { test, fresh: params.get("fresh") === "1" });
   return Response.json(result);
 }

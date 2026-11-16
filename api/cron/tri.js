@@ -3,6 +3,7 @@
 // Deux crons Vercel (7h et 8h UTC) pour gérer heure d'été / d'hiver : on ne trie qu'à 9h Paris.
 // Chaque poste ouvert dans Ashby est trié dans son propre appel à /api/tri-poste (temps limite par poste,
 // et une erreur sur un poste ne bloque pas les autres). Les postes sans Kick off + Scorecard remplis sont ignorés.
+// Interrupteur : rien ne part aux recruteurs tant que la variable Vercel TRI_ACTIF n'est pas à "1".
 // Test à la main : /api/cron/tri?force=1 (header Authorization: Bearer CRON_SECRET) -> vrai envoi aux recruteurs !
 //                  pour tester un seul poste sans rien envoyer aux recruteurs : voir api/tri-poste.js
 
@@ -18,6 +19,8 @@ function parisHour(d) {
 export async function GET(request) {
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) return new Response("Unauthorized", { status: 401 });
+
+  if (process.env.TRI_ACTIF !== "1") return Response.json({ skipped: "TRI_ACTIF pas à 1" });
 
   const url = new URL(request.url);
   if (url.searchParams.get("force") !== "1" && parisHour(new Date()) !== 9) return Response.json({ skipped: true });
