@@ -72,7 +72,7 @@ export async function handleRefus(payload, action) {
   const parts = [
     dryRun
       ? `🧪 Essai à sec (REFUS_ACTIF pas à 1), rien n'a été fait dans Ashby : ${refused.length} candidat${refused.length > 1 ? "s" : ""} aurai${refused.length > 1 ? "ent" : "t"} été refusé${refused.length > 1 ? "s" : ""} et archivé${refused.length > 1 ? "s" : ""}`
-      : `✅ ${refused.length} écarté${refused.length > 1 ? "s" : ""} refusé${refused.length > 1 ? "s" : ""} et archivé${refused.length > 1 ? "s" : ""} par ${who} le ${parisDay()} (mail « ${esc(result.template)} », envoyé par Ashby vers ${parisHour(result.sendAt)})`,
+      : `✅ ${refused.length} écarté${refused.length > 1 ? "s" : ""} refusé${refused.length > 1 ? "s" : ""} et archivé${refused.length > 1 ? "s" : ""} par ${who} le ${parisDay()} (mail « ${esc(result.template)} », envoyé par Ashby ${parisHour(result.sendAt)})`,
   ];
   if (skipped) parts.push(`${skipped} n'étai${skipped > 1 ? "ent" : "t"} plus en Application Review : pas touché${skipped > 1 ? "s" : ""}`);
   if (errors.length) parts.push(`⚠️ ${errors.length} erreur${errors.length > 1 ? "s" : ""} (à refuser à la main) : ${errors.map((e) => esc(e.name)).join(", ")}`);
