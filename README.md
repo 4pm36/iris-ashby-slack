@@ -19,4 +19,5 @@ Dans le message de tri (pas en mode test), un bouton avec confirmation envoie le
 - Mail : template Ashby « Application Rejection », ou « Application rejection - EN » pour les postes à l'étranger (pays du lieu du poste, sinon titre). Envoyé par Ashby 5 h après le clic, ou le lendemain à 8h32 si ces 5 h tombent après 20h (`mailSendAt` dans `lib/refus.js`).
 - Raison d'archivage : « Fit with the Job » (constante `RAISON` dans `lib/refus.js`). Si elle est introuvable dans Ashby, le clic ne fait rien et liste les raisons disponibles.
 - Interrupteur : tant que la variable Vercel `REFUS_ACTIF` n'est pas à `1`, un clic fait un essai à sec (il dit qui serait refusé, rien n'est écrit) et le bouton reste.
+- Test sur une seule candidature écartée (ex. vérifier l'expéditeur du mail) : `/api/refus-test?job=<jobId>` liste les écartés, `&application=<id>` fait un essai à sec, `&application=<id>&confirm=1` refuse vraiment cette seule candidature (header `Authorization: Bearer CRON_SECRET`, ignore `REFUS_ACTIF`)
 - La clé API Ashby doit avoir le droit `candidatesWrite` (et `communicationTemplatesRead`).
