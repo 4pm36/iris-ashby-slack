@@ -24,11 +24,15 @@ async function respond(url, body) {
   );
 }
 
+// "aujourd'hui vers 16h13" / "demain vers 8h32"
 function parisHour(iso) {
+  const fmt = (d, o) => new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", ...o }).format(d);
   const p = Object.fromEntries(
     new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((x) => [x.type, x.value])
   );
-  return `${Number(p.hour)}h${p.minute}`;
+  const day = { day: "2-digit", month: "2-digit" };
+  const when = fmt(new Date(iso), day) === fmt(new Date(), day) ? "aujourd'hui" : "demain";
+  return `${when} vers ${Number(p.hour)}h${p.minute}`;
 }
 
 function parisDay() {
