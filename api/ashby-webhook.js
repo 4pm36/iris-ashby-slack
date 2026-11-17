@@ -19,7 +19,8 @@ import {
 
 // ===== Webhook =====
 // Un entretien est planifié -> thread du candidat dans le channel du poste.
-// - Screening / Hiring Manager : "<Candidat (lien Ashby)> a pris RDV pour son entretien <Étape> avec @interviewer le …"
+// - Screening : rien (le thread s'ouvre au feedback de screening 3 ou 4, voir lib/feedback.js)
+// - Hiring Manager : "<Candidat (lien Ashby)> a pris RDV pour son entretien Hiring Manager avec @interviewer le …"
 // - Final : message avec le planning complet des interviews
 // - pas encore de thread : ce message devient le thread du candidat
 // - thread existant : on répond dedans
@@ -59,6 +60,9 @@ async function onInterviewScheduled(schedule) {
 
   const plan = await jobPlan(application.job.id);
   const kind = plan.kindByStage.get(schedule.interviewStageId) ?? null;
+  // Screening : aucun message à la prise de RDV (trop de bruit). Le thread du candidat s'ouvre
+  // seulement s'il a 3 ou 4 au screening (lib/feedback.js).
+  if (kind === "screening") return;
 
   const events = [...schedule.interviewEvents].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   let ts = await findThread(channel, application.id);
