@@ -3,8 +3,10 @@
 // Test à la main (header Authorization: Bearer CRON_SECRET) :
 //   /api/tri-poste?job=<jobId Ashby>&test=1          -> message à Léa seulement, journal pas modifié
 //   /api/tri-poste?job=<jobId Ashby>&test=1&fresh=1  -> idem, en relisant tous les CV (ignore les verdicts déjà notés)
+//   /api/tri-poste?job=<jobId Ashby>&note=<applicationId> -> trie cette seule candidature et, si top ou limite,
+//                                                            écrit la vraie note sur sa fiche Ashby (rien dans Slack)
 
-import { triPoste } from "../lib/tri.js";
+import { triPoste, noteTest } from "../lib/tri.js";
 
 export const maxDuration = 300;
 
@@ -15,6 +17,14 @@ export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const jobId = params.get("job");
   if (!jobId) return new Response("paramètre job manquant", { status: 400 });
+  const note = params.get("note");
+  if (note) {
+    try {
+      return Response.json(await noteTest(jobId, note));
+    } catch (e) {
+      return Response.json({ error: String(e.message) }, { status: 400 });
+    }
+  }
   const test = params.get("test") === "1";
   // Interrupteur : sans TRI_ACTIF=1, seul le mode test est permis (rien ne part aux recruteurs)
   if (!test && process.env.TRI_ACTIF !== "1") return Response.json({ skipped: "TRI_ACTIF pas à 1 (utiliser test=1)" });
