@@ -24,15 +24,17 @@ async function respond(url, body) {
   );
 }
 
-// "aujourd'hui vers 16h13" / "demain vers 8h32"
+// "aujourd'hui à 18h32" / "demain à 18h32" / "lundi 23/11 à 18h32"
 function parisHour(iso) {
   const fmt = (d, o) => new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", ...o }).format(d);
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((x) => [x.type, x.value])
-  );
+  const d = new Date(iso);
   const day = { day: "2-digit", month: "2-digit" };
-  const when = fmt(new Date(iso), day) === fmt(new Date(), day) ? "aujourd'hui" : "demain";
-  return `${when} vers ${Number(p.hour)}h${p.minute}`;
+  const time = fmt(d, { hour: "2-digit", minute: "2-digit", hour12: false }).replace(":", "h");
+  const when =
+    fmt(d, day) === fmt(new Date(), day) ? "aujourd'hui" :
+    fmt(d, day) === fmt(new Date(Date.now() + 864e5), day) ? "demain" :
+    `${fmt(d, { weekday: "long" })} ${fmt(d, day)}`;
+  return `${when} à ${time}`;
 }
 
 function parisDay() {
