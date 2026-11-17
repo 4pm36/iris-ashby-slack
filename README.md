@@ -17,6 +17,6 @@ Dans le message de tri (pas en mode test), un bouton avec confirmation envoie le
 
 - Code : `lib/refus.js` (appelé par `api/slack-interactions.js`)
 - Mail : template Ashby « Application Rejection », ou « Application rejection - EN » pour les postes à l'étranger (pays du lieu du poste, sinon titre). Envoyé par Ashby à son heure par défaut (le lendemain matin, 9h32).
-- Raison d'archivage : « Fit with job » (constante `RAISON` dans `lib/refus.js`). Si elle est introuvable dans Ashby, le clic ne fait rien et liste les raisons disponibles.
+- Raison d'archivage : « Fit with the Job » (constante `RAISON` dans `lib/refus.js`). Si elle est introuvable dans Ashby, le clic ne fait rien et liste les raisons disponibles.
 - Interrupteur : tant que la variable Vercel `REFUS_ACTIF` n'est pas à `1`, un clic fait un essai à sec (il dit qui serait refusé, rien n'est écrit) et le bouton reste.
 - La clé API Ashby doit avoir le droit `candidatesWrite` (et `communicationTemplatesRead`).
