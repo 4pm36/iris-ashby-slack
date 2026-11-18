@@ -1,6 +1,8 @@
 // Iris — tri automatique des candidatures, lundi, mercredi et vendredi à 9h (heure de Paris)
 //
-// Deux crons Vercel (7h et 8h UTC) pour gérer heure d'été / d'hiver : on ne trie qu'à 9h Paris.
+// Déclenché par cron-job.org (comme /api/cron/suivi) : lundi, mercredi, vendredi à 9h00 Europe/Paris,
+// header Authorization: Bearer CRON_SECRET. Plus de cron Vercel : sur le plan Hobby, il part à une minute
+// au hasard dans l'heure, et le 18/11 il n'est pas parti du tout. Garde-fou : on ne trie qu'entre 9h et 9h59 Paris.
 // Chaque poste ouvert dans Ashby est trié dans son propre appel à /api/tri-poste (temps limite par poste,
 // et une erreur sur un poste ne bloque pas les autres). Les postes sans Kick off + Scorecard remplis sont ignorés.
 // Interrupteur : rien ne part aux recruteurs tant que la variable Vercel TRI_ACTIF n'est pas à "1".
@@ -9,6 +11,7 @@
 
 import { openJobs } from "../../lib/tri.js";
 import { postMessage } from "../../lib/iris.js";
+import { waitUntil } from "@vercel/functions";
 
 export const maxDuration = 300;
 
@@ -26,10 +29,16 @@ export async function GET(request) {
   if (url.searchParams.get("force") !== "1" && parisHour(new Date()) !== 9) return Response.json({ skipped: true });
 
   const jobs = await openJobs();
+  // Réponse immédiate (cron-job.org coupe au bout de 30 s) ; le tri continue en arrière-plan.
+  waitUntil(trierTout(jobs, url.origin, auth));
+  return Response.json({ started: jobs.map((j) => j.title) });
+}
+
+async function trierTout(jobs, origin, auth) {
   const results = await Promise.all(
     jobs.map(async (job) => {
       try {
-        const res = await fetch(`${url.origin}/api/tri-poste?job=${job.id}`, { headers: { authorization: auth } });
+        const res = await fetch(`${origin}/api/tri-poste?job=${job.id}`, { headers: { authorization: auth } });
         return res.ok ? await res.json() : { job: job.title, error: `HTTP ${res.status}` };
       } catch (e) {
         return { job: job.title, error: String(e.message) };
@@ -46,5 +55,4 @@ export async function GET(request) {
       text: `⚠️ Tri des candidatures non abouti pour : ${failed.map((r) => `${r.job} (${r.error})`).join(", ")}. Iris réessaiera au prochain passage.`,
     }).catch(() => {});
   }
-  return Response.json(results);
 }
