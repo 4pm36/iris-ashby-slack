@@ -5,6 +5,7 @@ import {
   verifySignature,
   getApplication,
   getInterview,
+  SCREENING,
   applicationLink,
   jobPlan,
   postMessage,
@@ -63,6 +64,8 @@ async function onInterviewScheduled(schedule) {
   // Screening : aucun message à la prise de RDV (trop de bruit). Le thread du candidat s'ouvre
   // seulement s'il a 3 ou 4 au screening (lib/feedback.js).
   if (kind === "screening") return;
+  // Screencall pris depuis une autre étape (ex. « Hot lead ») : reconnu au titre de l'entretien.
+  for (const e of schedule.interviewEvents) if (SCREENING.test((await getInterview(e.interviewId)).title ?? "")) return;
 
   const events = [...schedule.interviewEvents].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
   let ts = await findThread(channel, application.id);
