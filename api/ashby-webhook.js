@@ -117,14 +117,12 @@ async function postFinalPlanning({ application, schedule, events, channel, ts, a
     lines.push(`• *${formatHour(e.startTime)}–${formatHour(e.endTime)}* · ${title}${who ? ` · ${who}` : ""}`);
   }
 
-  const lea = process.env.SLACK_USER_ID ? `<@${process.env.SLACK_USER_ID}>` : "Léa";
   const text =
     `Hello, nous recevons <${link}?${key}|${name}> pour son entretien final le *${formatDay(events[0].startTime)}* ` +
     `pour le poste de ${application.job.title}.\n\n` +
     `Planning des interviews :\n${lines.join("\n")}\n\n` +
     `Ce thread vous servira à échanger sur le candidat pendant l'entretien. ` +
     `Un feedback vous sera demandé en privé à la fin de votre tour.\n\n` +
-    `Si le candidat ne réussit pas le case, signalez-le à ${lea} en lui donnant votre feedback, elle le raccompagnera.\n\n` +
     `Bonne interview ! 😊`;
 
   const end = Math.max(...events.map((e) => Date.parse(e.endTime) / 1000));
