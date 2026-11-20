@@ -7,11 +7,16 @@
 //
 // Variables d'environnement Vercel : ASHBY_API_KEY, SLACK_BOT_TOKEN, SLACK_USER_ID, LEA_EMAIL,
 // GOOGLE_ICAL_URL, CRON_SECRET
+// En plus : rappel des candidats "en attente de décision" = entretien sur tes process ces 30 derniers jours,
+// candidature toujours active, toujours dans l'étape de cet entretien, et aucun autre entretien planifié.
 // Test à la main : /api/cron/resume-entretiens?force=1 (avec le header Authorization: Bearer CRON_SECRET)
+
+import { applicationLink, formatDay } from "../../lib/iris.js";
 
 const ASHBY = "https://api.ashbyhq.com";
 const TZ = "Europe/Paris";
 const BOOKING_TITLE = /min avec Léa/i;
+const DAY = 24 * 3600 * 1000;
 const BOOKING_QUESTION = "Par quel poste es-tu intéressé(e) ?";
 
 async function ashby(endpoint, body = {}) {
@@ -138,10 +143,18 @@ export async function GET(request) {
 
   // Entretiens qui ont eu lieu aujourd'hui (un planning annulé n'est plus "Scheduled"/"Complete" ou n'a plus de créneau)
   const byApplication = new Map(); // applicationId -> Map(interviewerId -> nom ou null)
+  const history = new Map(); // applicationId -> { last: {start, stageId}, future, interviewers }
   for (const s of schedules) {
     if (/cancel/i.test(String(s.status))) continue;
     for (const ev of s.interviewEvents ?? []) {
       const start = new Date(ev.startTime);
+      const h = history.get(s.applicationId) ?? { last: null, future: false, interviewers: new Set() };
+      if (start > now) h.future = true;
+      else if (start > now - 30 * DAY) {
+        if (!h.last || start > h.last.start) h.last = { start, stageId: s.interviewStageId };
+        for (const id of ev.interviewerUserIds ?? []) h.interviewers.add(id);
+      }
+      history.set(s.applicationId, h);
       if (parisDate(start) !== today || start > now) continue;
       const who = byApplication.get(s.applicationId) ?? new Map();
       for (const id of ev.interviewerUserIds ?? []) if (!who.has(id)) who.set(id, null);
@@ -190,9 +203,34 @@ export async function GET(request) {
     }
   }
 
-  if (lines.length === 0) return Response.json({ sent: false, reason: "aucun entretien" });
+  // 3. Candidats toujours en attente de décision (hors ceux vus aujourd'hui, déjà listés au-dessus)
+  const pending = [];
+  for (const [applicationId, h] of history) {
+    if (!h.last || h.future || parisDate(h.last.start) === today) continue;
+    const app = (await ashby("application.info", { applicationId })).results;
+    if (seenCandidates.has(app.candidate.id)) continue;
+    const inHiringTeam = (app.hiringTeam ?? []).some((m) => m.userId === myId);
+    if (myId && !inHiringTeam && !h.interviewers.has(myId)) continue;
+    if (app.status !== "Active" || app.currentInterviewStage?.id !== h.last.stageId) continue;
+    const days = Math.floor((now - h.last.start) / DAY);
+    pending.push({
+      start: h.last.start,
+      line:
+        `• <${applicationLink(app)}|${app.candidate.name}> ${app.job?.title ?? ""} · ${app.currentInterviewStage.title} · ` +
+        `entretien le ${formatDay(h.last.start.toISOString())} (${days} j)`,
+    });
+  }
+  pending.sort((a, b) => a.start - b.start); // les plus anciens d'abord
 
-  const text = `Résumé des entretiens de la journée :\n\n${lines.join("\n")}`;
+  // Le week-end, pas de message s'il n'y a que la liste d'attente
+  const weekend = ["Sat", "Sun"].includes(new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" }).format(now));
+  if (lines.length === 0 && (pending.length === 0 || weekend))
+    return Response.json({ sent: false, reason: "aucun entretien" });
+
+  const parts = [];
+  if (lines.length) parts.push(`Résumé des entretiens de la journée :\n\n${lines.join("\n")}`);
+  if (pending.length) parts.push(`Toujours en attente de décision :\n\n${pending.map((p) => p.line).join("\n")}`);
+  const text = parts.join("\n\n");
   const slack = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
@@ -203,5 +241,5 @@ export async function GET(request) {
   }).then((r) => r.json());
 
   if (!slack.ok) throw new Error(`Slack: ${slack.error}`);
-  return Response.json({ sent: true, count: lines.length });
+  return Response.json({ sent: true, count: lines.length, pending: pending.length });
 }
