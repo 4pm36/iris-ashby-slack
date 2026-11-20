@@ -64,6 +64,7 @@ async function onInterviewScheduled(schedule) {
   // Screening : aucun message à la prise de RDV (trop de bruit). Le thread du candidat s'ouvre
   // seulement s'il a 3 ou 4 au screening (lib/feedback.js).
   if (kind === "screening") return;
+  if (kind === "reference") return; // prise de références : rien
   // Screencall pris depuis une autre étape (ex. « Hot lead ») : reconnu au titre de l'entretien.
   for (const e of schedule.interviewEvents) if (SCREENING.test((await getInterview(e.interviewId)).title ?? "")) return;
 
