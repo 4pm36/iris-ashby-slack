@@ -55,4 +55,15 @@ async function trierTout(jobs, origin, auth) {
       text: `⚠️ Tri des candidatures non abouti pour : ${failed.map((r) => `${r.job} (${r.error})`).join(", ")}. Iris réessaiera au prochain passage.`,
     }).catch(() => {});
   }
+
+  // Poste ouvert dans Ashby sans page du même nom dans Notion (Job infos) : pas trié, on prévient Léa.
+  const sansPage = results.filter((r) => r.skipped === "pas de page dans Job infos");
+  if (sansPage.length && process.env.SLACK_USER_ID) {
+    await postMessage({
+      channel: process.env.SLACK_USER_ID,
+      text:
+        `⚠️ Pas de tri des CV pour ${sansPage.map((r) => `*${r.job}*`).join(", ")} : aucune page de ce nom dans Notion (Job infos). ` +
+        `Le titre de la page Notion doit être exactement celui du poste dans Ashby.`,
+    }).catch(() => {});
+  }
 }
