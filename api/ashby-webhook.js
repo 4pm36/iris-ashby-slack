@@ -69,6 +69,9 @@ async function onInterviewScheduled(schedule) {
   for (const e of schedule.interviewEvents) if (SCREENING.test((await getInterview(e.interviewId)).title ?? "")) return;
 
   const events = [...schedule.interviewEvents].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  // Entretien déjà commencé : Ashby modifie parfois les créneaux après coup (ex. à la fin d'un entretien final).
+  // Un RDV ou un planning dans le passé n'apporte rien : on ne poste rien.
+  if (Date.parse(events[0].startTime) <= Date.now()) return;
   let ts = await findThread(channel, application.id);
   const already = ts ? await threadMessages(channel, ts) : [];
 
